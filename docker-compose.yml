@@ -1,0 +1,109 @@
+version: "3.8"
+
+x-shared: &shared
+  restart: always
+  image: docker.n8n.io/n8nio/n8n
+  environment:
+    - GENERIC_TIMEZONE=Europe/Paris
+    - N8N_HOST=${SUBDOMAIN}.${DOMAIN_NAME}
+    - N8N_PORT=5678
+    - N8N_PROTOCOL=https
+    - N8N_ENCRYPTION_KEY
+    - N8N_DIAGNOSTICS_ENABLED=false
+    - N8N_VERSION_NOTIFICATIONS_ENABLED=false
+    - N8N_TEMPLATES_ENABLED=false
+    - EXTERNAL_FRONTEND_HOOKS_URLS=
+    - N8N_DIAGNOSTICS_CONFIG_FRONTEND=
+    - N8N_DIAGNOSTICS_CONFIG_BACKEND=
+    - N8N_ONBOARDING_FLOW_DISABLED=true
+    - NODE_ENV=production
+    - WEBHOOK_URL=https://${SUBDOMAIN}.${DOMAIN_NAME}/
+    - DB_TYPE=postgresdb
+    - DB_POSTGRESDB_HOST=postgres
+    - DB_POSTGRESDB_PORT=5432
+    - DB_POSTGRESDB_DATABASE=${POSTGRES_DB}
+    - DB_POSTGRESDB_USER=${POSTGRES_USER}
+    - DB_POSTGRESDB_PASSWORD=${POSTGRES_PASSWORD}
+    - EXECUTIONS_MODE=queue
+    - QUEUE_BULL_REDIS_HOST=redis
+    - QUEUE_HEALTH_CHECK_ACTIVE=true
+    - EXECUTIONS_TIMEOUT=60
+  links:
+    - postgres
+    - redis
+  networks:
+    - internal
+  volumes:
+    - n8n_storage:/home/node/.n8n
+  depends_on:
+    redis:
+      condition: service_healthy
+    postgres:
+      condition: service_healthy
+
+services:
+  adminer:
+    image: adminer
+    restart: always
+    networks:
+      - internal
+      - reverse-proxy
+  
+  postgres:
+    image: postgres:16
+    restart: always
+    environment:
+      - POSTGRES_USER
+      - POSTGRES_PASSWORD
+      - POSTGRES_DB
+    networks:
+      - internal
+    volumes:
+      - db_storage:/var/lib/postgresql/data
+    healthcheck:
+      test: ['CMD-SHELL', 'pg_isready -h localhost -U ${POSTGRES_USER} -d ${POSTGRES_DB}']
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  redis:
+    image: redis:7-alpine
+    restart: always
+    networks:
+      - internal
+    volumes:
+      - redis_storage:/data
+    healthcheck:
+      test: ['CMD', 'redis-cli', 'ping']
+      interval: 5s
+      timeout: 5s
+      retries: 10
+      
+  main:
+    <<: *shared
+    networks:
+      - reverse-proxy
+      - internal
+
+
+  worker1:
+    <<: *shared
+    command: worker
+    depends_on:
+      - main
+
+  worker2:
+    <<: *shared
+    command: worker
+    depends_on:
+      - main
+
+volumes:
+  db_storage:
+  redis_storage:
+  n8n_storage:
+
+networks:
+  internal:
+  reverse-proxy:
+    external: true
